@@ -1,4 +1,5 @@
 # sls-day-of-service-givebutter-googlechat-pipeline
+🔗 **Live Campaign:** [View the Active 2026 Day of Service Campaign](https://givebutter.com/YOUR_CAMPAIGN_LINK_HERE)
 An automated data pipeline built with Google Apps Script that connects Givebutter webhooks to Google Sheets, dynamically tracking fundraising metrics, cohort leaderboards, and broadcasting weekly recaps to Google Chat.
 
 Architecture Overview
