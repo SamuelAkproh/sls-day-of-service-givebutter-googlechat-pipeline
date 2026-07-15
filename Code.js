@@ -1,9 +1,21 @@
 // ==========================================
-// 1. THE LIVE WEBHOOK TRAFFIC COP (UPDATED FOR TICKETS/VOLUNTEERS)
+// 🚦 1. LIVE WEBHOOK TRAFFIC COP (UPDATED FOR CAMPAIGN FILTER & VOLUNTEERS)
 // ==========================================
 function doPost(e) {
   var json = JSON.parse(e.postData.contents);
   var data = json.data;
+  
+  //  CAMPAIGN FILTER: Skip anything belonging to the Banquet campaign
+  var campaignTitle = "";
+  if (data.campaign && data.campaign.title) {
+    campaignTitle = data.campaign.title.toLowerCase();
+  } else if (json.campaign && json.campaign.title) {
+    campaignTitle = json.campaign.title.toLowerCase();
+  }
+  
+  if (campaignTitle.includes("banquet")) {
+    return ContentService.createTextOutput(JSON.stringify({"status": "skipped - banquet campaign transaction"})).setMimeType(ContentService.MimeType.JSON);
+  }
   
   // Skip uncompleted transactions
   if (json.event === "transaction.success" && (!data.amount || parseFloat(data.amount) === 0) && !data.tickets) {
@@ -42,7 +54,7 @@ function doPost(e) {
   var currentDate = new Date(); 
   var cleanIncomingEmail = donorEmail.toString().toLowerCase().trim();
   
-  // Decide if this transaction is a donation or a volunteer ticket registration
+  // Decide if this transaction is a volunteer ticket registration
   var isVolunteerRegistration = false;
   if (data.tickets && data.tickets.length > 0) {
     for (var j = 0; j < data.tickets.length; j++) {
@@ -53,7 +65,7 @@ function doPost(e) {
     }
   }
 
-  // EXCLUSION: If registration status is "revoked" or if the ticket is for a Banquet, skip volunteer log
+  // EXCLUSION: If registration status is "revoked", skip volunteer log
   if (transactionStatus === "revoked") {
     return ContentService.createTextOutput(JSON.stringify({"status": "skipped revoked internal registration"})).setMimeType(ContentService.MimeType.JSON);
   }
@@ -75,7 +87,7 @@ function doPost(e) {
     sendGoogleChatNotification("💰 *NEW DONATION!* " + donorName + " just supported *" + scholarName + "* (" + teamCohort + ") with $" + amount.toFixed(2) + "! 🔥");
     
   } else if (isVolunteerRegistration) {
-    // ---- PROCESS VOLUNTEER REGISTRATION (Includes paid $15 T-Shirt Volunteers) ----
+    // ---- PROCESS VOLUNTEER REGISTRATION ----
     var volunteerSheet = ss.getSheetByName("Volunteers");
     var volunteerLastRow = volunteerSheet.getLastRow();
     if (volunteerLastRow > 1) {
@@ -103,7 +115,7 @@ function doPost(e) {
 }
 
 // ==========================================
-// 📊 2. AUTOMATED FRIDAY RECAP SCRIPT (PRODUCTION ACTIVE)
+//  2. AUTOMATED FRIDAY RECAP SCRIPT (PRODUCTION ACTIVE)
 // ==========================================
 function sendWeeklyRecap() {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
@@ -142,9 +154,15 @@ function sendWeeklyRecap() {
     wowSentence = "✊ *HOLDING STRONG:* We are maintaining our steady momentum from last week! Let's push for a big breakout weekend! 🚀\n";
   }
 
+  //  MILESTONE ENGINE (Generates every $500 matched to your current total)
+  var currentMilestoneTier = Math.floor(totalRaised / 500) * 500;
   var milestoneCelebration = "";
-  if (totalRaised >= 1500.00) {
-    milestoneCelebration = "🎉🔥 *MAJOR MILESTONE ALERT:* We have officially shattered the *$1,500* mark together! Huge shoutout to the entire SLS family for locking in and pushing this movement forward. The momentum is unstoppable! 🙌🏽💙\n\n";
+  if (currentMilestoneTier >= 500) {
+    var percentageMatched = ((currentMilestoneTier / CONFIG.GOAL_AMOUNT) * 100).toFixed(0);
+    milestoneCelebration = "🎉🔥 *MILESTONE UNLOCKED:* We have officially crossed the *$" + 
+                           currentMilestoneTier.toLocaleString() + "* mark! That is *" + 
+                           percentageMatched + "%* of our ultimate goal locked in! " +
+                           "The momentum is real, let's keep scaling! 🙌🏽💙\n\n";
   }
 
   var mvpAtlantaName = advancedData.mvpAtlanta.name;
@@ -323,7 +341,7 @@ function getAdvancedFundraisingData(ss) {
 }
 
 // ==========================================
-//  EMAIL-TO-SCHOLAR RESOLVER
+// DYNAMIC EMAIL-TO-SCHOLAR RESOLVER
 // ==========================================
 function getCleanScholarName(email, fallbackName) {
   var cleanEmail = email.toString().toLowerCase().trim();
