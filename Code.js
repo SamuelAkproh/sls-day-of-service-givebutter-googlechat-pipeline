@@ -1,5 +1,5 @@
 // ==========================================
-//  1. LIVE WEBHOOK TRAFFIC COP (DYNAMIC PEER-TO-PEER MAPPING)
+//  1. LIVE WEBHOOK TRAFFIC COP
 // ==========================================
 function doPost(e) {
   var json = JSON.parse(e.postData.contents);
@@ -16,7 +16,7 @@ function doPost(e) {
 }
 
 // ==========================================
-// HANDLES: ticket.created (volunteer signups)
+//  HANDLES: ticket.created (volunteer signups)
 // ==========================================
 function handleTicketCreated(ss, data) {
   var ticketTitle = (data.title || "").toLowerCase().trim();
@@ -58,6 +58,9 @@ function handleTicketCreated(ss, data) {
                          "*" + donorName + "* signed up for our *2026 Day Of Service*! 💛\n" +
                          "🚀 Total mobilized: *" + liveVolunteerCount + "* volunteers!";
   sendGoogleChatNotification(volunteerMessage, CONFIG.URL_VOLUNTEER_ALERTS);
+
+  // Check volunteer milestones (e.g., hitting 60 and beyond)
+  checkAndAnnounceVolunteerMilestone(ss);
 
   return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
 }
@@ -113,8 +116,7 @@ function handleTransactionSucceeded(ss, data) {
 
   donorSheet.appendRow([currentDate, donorName, donorEmail, teamCohort, amount, scholarName, transactionId]);
 
-  // NOTE: Individual donation chat alerts have been removed here per your request (since you get emails)!
-  
+  // Check fundraising milestone & approaching milestones
   checkAndAnnounceMilestone(ss);
 
   return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
@@ -131,8 +133,6 @@ function buildRecapMessage(headerTitle, bannerOverride) {
   var reportSheet = ss.getSheetByName("Weekly Report");
   
   var totalRaised = reportSheet.getRange("B2").getValue() || 0;
-  var rawWeeklyDiff = reportSheet.getRange("E2").getValue();
-  var weeklyDifference = (rawWeeklyDiff && !isNaN(rawWeeklyDiff)) ? parseFloat(rawWeeklyDiff) : 0.00;
   var totalVolunteers = reportSheet.getRange("G2").getValue() || 0;
   var progressPercentage = (totalRaised / CONFIG.GOAL_AMOUNT) * 100;
   
@@ -149,11 +149,21 @@ function buildRecapMessage(headerTitle, bannerOverride) {
   }
   if (top5String === "") { top5String = "No individual donations registered yet! 🌱\n"; }
 
-  var currentMilestoneTier = Math.floor(totalRaised / 500) * 500;
-  var milestoneCelebration = "";
-  if (currentMilestoneTier >= 500) {
-    var percentageMatched = ((currentMilestoneTier / CONFIG.GOAL_AMOUNT) * 100).toFixed(0);
-    milestoneCelebration = "🎉 *MILESTONE UNLOCKED:* Crossed *$" + currentMilestoneTier.toLocaleString() + "* (" + percentageMatched + "% of our goal)! 🙌🏽💙\n\n";
+  // 🎯 Dynamic Milestone / Approaching Milestone Banner Logic
+  var milestoneInterval = 500;
+  var nextTier = Math.ceil(totalRaised / milestoneInterval) * milestoneInterval;
+  var distanceToMilestone = nextTier - totalRaised;
+  var cushion = 100; // Triggers "Almost There" if within $100 of the next milestone
+  
+  var milestoneBanner = "";
+  if (distanceToMilestone > 0 && distanceToMilestone <= cushion) {
+    milestoneBanner = "👀 *ALMOST THERE:* Just *$" + distanceToMilestone.toFixed(2) + "* away from crossing *$" + nextTier.toLocaleString() + "*! 🏁💙\n\n";
+  } else {
+    var currentMilestoneTier = Math.floor(totalRaised / 500) * 500;
+    if (currentMilestoneTier >= 500) {
+      var percentageMatched = ((currentMilestoneTier / CONFIG.GOAL_AMOUNT) * 100).toFixed(0);
+      milestoneBanner = "🎉 *MILESTONE UNLOCKED:* Crossed *$" + currentMilestoneTier.toLocaleString() + "* (" + percentageMatched + "% of our goal)! 🙌🏽💙\n\n";
+    }
   }
 
   var highestDonorSection = "🥇 *WEEKLY HIGHEST DONOR:* Let's kick off the week with some donations!";
@@ -167,16 +177,19 @@ function buildRecapMessage(headerTitle, bannerOverride) {
   var message = headerTitle + "\n" +
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
                 banner +
-                milestoneCelebration +
+                milestoneBanner +
                 "💰 *TOTAL RAISED:* *$" + totalRaised.toFixed(2) + "* / $" + CONFIG.GOAL_AMOUNT.toFixed(2) + " (" + progressPercentage.toFixed(0) + "% progress) 🚀\n" +
                 "🙋🏽‍♂️ *VOLUNTEERS:* *" + totalVolunteers + "* leaders registered!\n" +
-                "📈 *THIS WEEK:* Added *+$" + weeklyDifference.toFixed(2) + "* to the campaign!\n\n" +
+                "☀️ *RAISED TODAY:* +$" + analytics.todayTotalRaised.toFixed(2) + " added today! 🚀\n" +
+                // "📈 *THIS WEEK:* Added +$" + weeklyDifference.toFixed(2) + " to the campaign!\n\n" + (Commented out for Friday)
+                "\n" +
                 "🏆 *COHORT LEADERBOARD:*\n" +
                 "👉 *" + winningTeam + "* leads the race with *$" + winningAmount.toFixed(2) + "* raised! 🔥\n\n" +
                 "💎 *ALL-TIME TOP SCHOLARS:*\n" +
-                top5String + "\n" + //
+                top5String + 
+                "\n" +
                 highestDonorSection + "\n\n" +
-                "☀️ *ACTIVE TODAY:* " + (analytics.todayActiveScholarsList || "None yet today—let's get the momentum rolling!") + "\n\n" +
+                "☀️ *ACTIVE FUNDRASIERS TODAY:* " + (analytics.todayActiveScholarsList || "None yet today—let's get the momentum rolling!") + "\n\n" +
                 "👏 *ACTIVE WEEKLY FUNDRAISERS:* " + (analytics.activeScholarsList || "None this week yet—let's secure that first donation!") + "\n\n" +
                 "Every single share and donation brings us closer to making an impact. Let's keep supporting one another and push hard as a cohort! 💛💙";
 
@@ -194,7 +207,7 @@ function sendDailyCountdownRecap() {
     ? ("⏳ *" + daysLeft + " DAY" + (daysLeft === 1 ? "" : "S") + " UNTIL DAY OF SERVICE!*\n\n")
     : ("🎉 *TODAY IS DAY OF SERVICE!!* 🎉\n\n");
   var message = buildRecapMessage("🚨 *SLS DAY OF SERVICE: DAILY COUNTDOWN* 🚨", banner);
-  sendGoogleChatNotification(message, CONFIG.URL_VOLUNTEER_ALERTS);
+  sendGoogleChatNotification(message, CONFIG.URL_WEEKLY_RECAP);
 }
 
 function checkAndAnnounceMilestone(ss) {
@@ -213,6 +226,47 @@ function checkAndAnnounceMilestone(ss) {
                        "Keep it going, SLS fam! 💛";
     sendGoogleChatNotification(milestoneMsg, CONFIG.URL_WEEKLY_RECAP);
     props.setProperty("LAST_MILESTONE_ANNOUNCED", currentTier.toString());
+  }
+  
+  // Check if we are approaching a milestone ("Almost There" alert)
+  checkApproachingMilestone(ss, totalRaised);
+}
+
+function checkApproachingMilestone(ss, totalRaised) {
+  var milestoneInterval = 500; 
+  var nextTier = Math.ceil(totalRaised / milestoneInterval) * milestoneInterval;
+  var cushion = 100; // Triggers if within $100 of the next milestone
+  var distanceToMilestone = nextTier - totalRaised;
+  
+  if (distanceToMilestone > 0 && distanceToMilestone <= cushion) {
+    var props = PropertiesService.getScriptProperties();
+    var lastApproachingAlert = props.getProperty("LAST_APPROACHING_MILESTONE") || "";
+    
+    if (lastApproachingAlert !== nextTier.toString()) {
+      var approachingMsg = "👀 *ALMOST THERE, SLS FAM!* 👀\n" +
+                           "We are just *$" + distanceToMilestone.toFixed(2) + "* away from crossing *$" + nextTier.toLocaleString() + "*! 🏁💙\n" +
+                           "Let's secure a few final donations and smash this milestone right now! 💰🔥";
+      sendGoogleChatNotification(approachingMsg, CONFIG.URL_WEEKLY_RECAP);
+      props.setProperty("LAST_APPROACHING_MILESTONE", nextTier.toString());
+    }
+  }
+}
+
+function checkAndAnnounceVolunteerMilestone(ss) {
+  SpreadsheetApp.flush();
+  var reportSheet = ss.getSheetByName("Weekly Report");
+  var totalVolunteers = reportSheet.getRange("G2").getValue() || 0;
+  
+  var currentVolTier = Math.floor(totalVolunteers / 50) * 50;
+  var props = PropertiesService.getScriptProperties();
+  var lastAnnouncedVol = parseInt(props.getProperty("LAST_VOLUNTEER_MILESTONE") || "0", 10);
+  
+  if ((currentVolTier > lastAnnouncedVol && currentVolTier > 0) || (totalVolunteers >= 60 && lastAnnouncedVol < 60)) {
+    var volMilestoneMsg = "🎉 *VOLUNTEER MILESTONE UNLOCKED!* 🎉\n" +
+                          "We have officially mobilized *" + totalVolunteers + "* leaders for our Day of Service! 🙌🏽💛\n" +
+                          "The momentum is unreal. Let's keep pushing for even more change maker signups! 🚀";
+    sendGoogleChatNotification(volMilestoneMsg, CONFIG.URL_WEEKLY_RECAP);
+    props.setProperty("LAST_VOLUNTEER_MILESTONE", totalVolunteers.toString());
   }
 }
 
@@ -258,7 +312,7 @@ function runWeeklySnapshot() {
 }
 
 // ==========================================
-// HELPERS & ANALYTICS
+// 🔍 HELPERS & ANALYTICS (CALENDAR-WEEK ANCHORED)
 // ==========================================
 function getRosterEntry(ss, memberId) {
   var rosterSheet = ss.getSheetByName("Roster");
@@ -323,7 +377,6 @@ function getTopTeamData(sheet) {
   return topTeam !== "" ? { teamName: topTeam, amountRaised: maxAmount, contributors: topContributors } : defaultResult;
 }
 
-//  UPGRADED ANALYTICS: Handles weekly mapping and daily activity tracking for daily fundraisers
 function getAllTimeCampaignAnalytics(ss) {
   var donorSheet = ss.getSheetByName("Donors");
   var lastRow = donorSheet.getLastRow();
@@ -333,7 +386,8 @@ function getAllTimeCampaignAnalytics(ss) {
     weeklyTopDonorsList: [],
     weeklyTopDonationAmount: 0.00,
     activeScholarsList: "",
-    todayActiveScholarsList: ""
+    todayActiveScholarsList: "",
+    todayTotalRaised: 0.00
   };
   
   if (lastRow < 2) return result;
@@ -341,13 +395,18 @@ function getAllTimeCampaignAnalytics(ss) {
   var rawData = donorSheet.getRange("A2:F" + lastRow).getValues();
   
   var today = new Date();
-  var sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(today.getDate() - 7);
+  var dayOfWeek = today.getDay(); 
+  var distanceToMonday = (dayOfWeek === 0) ? -6 : (1 - dayOfWeek);
+  
+  var startOfThisWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  startOfThisWeek.setDate(today.getDate() + distanceToMonday);
+  startOfThisWeek.setHours(0, 0, 0, 0);
   
   var allTimeTotals = {};
-  var weeklyDonorMaxMap = {}; // Tracks max single donation per donor this week
+  var weeklyDonorMaxMap = {}; 
   var scholarsActiveThisWeek = [];
   var scholarsActiveToday = [];
+  var todayTotalRaised = 0.00;
   
   var maxWeeklyDonationFound = 0;
   
@@ -362,7 +421,6 @@ function getAllTimeCampaignAnalytics(ss) {
     var cleanScholar = scholarName.toLowerCase();
     if (cleanScholar === "general campaign" || cleanScholar === "campaign" || cleanScholar === "athens" || cleanScholar === "atlanta" || cleanScholar === "") continue;
     
-    // All-time totals accumulator
     if (!allTimeTotals[scholarName]) {
       allTimeTotals[scholarName] = 0.00;
     }
@@ -370,13 +428,10 @@ function getAllTimeCampaignAnalytics(ss) {
     
     var transactionDate = new Date(timestamp);
     
-    // Check rolling weekly activity
-    if (!isNaN(transactionDate.getTime()) && transactionDate >= sevenDaysAgo) {
+    if (!isNaN(transactionDate.getTime()) && transactionDate >= startOfThisWeek) {
       if (scholarsActiveThisWeek.indexOf(scholarName) === -1) {
         scholarsActiveThisWeek.push(scholarName);
       }
-      
-      // Track highest donor amounts for the week
       if (donorName) {
         if (!weeklyDonorMaxMap[donorName] || amount > weeklyDonorMaxMap[donorName]) {
           weeklyDonorMaxMap[donorName] = amount;
@@ -384,7 +439,6 @@ function getAllTimeCampaignAnalytics(ss) {
       }
     }
     
-    // Check today's activity (same calendar day)
     if (!isNaN(transactionDate.getTime()) && 
         transactionDate.getFullYear() === today.getFullYear() &&
         transactionDate.getMonth() === today.getMonth() &&
@@ -392,10 +446,10 @@ function getAllTimeCampaignAnalytics(ss) {
       if (scholarsActiveToday.indexOf(scholarName) === -1) {
         scholarsActiveToday.push(scholarName);
       }
+      todayTotalRaised += amount;
     }
   }
   
-  // Find the max weekly donation and catch ALL ties
   for (var dName in weeklyDonorMaxMap) {
     var amt = weeklyDonorMaxMap[dName];
     if (amt > maxWeeklyDonationFound) {
@@ -409,7 +463,6 @@ function getAllTimeCampaignAnalytics(ss) {
   }
   result.weeklyTopDonationAmount = maxWeeklyDonationFound;
   
-  // Sort all-time top 5
   var sortedAllTime = [];
   for (var key in allTimeTotals) {
     sortedAllTime.push({ name: key, amount: allTimeTotals[key] });
@@ -419,12 +472,13 @@ function getAllTimeCampaignAnalytics(ss) {
   result.top5Rows = sortedAllTime.slice(0, 5);
   result.activeScholarsList = scholarsActiveThisWeek.join(", ");
   result.todayActiveScholarsList = scholarsActiveToday.join(", ");
+  result.todayTotalRaised = todayTotalRaised;
   
   return result;
 }
 
 // ==========================================
-// GOOGLE CHAT WEBHOOK SENDER
+//  GOOGLE CHAT WEBHOOK SENDER
 // ==========================================
 function sendGoogleChatNotification(text, webhookUrl) {
   var targetUrl = webhookUrl || CONFIG.URL_VOLUNTEER_ALERTS;
