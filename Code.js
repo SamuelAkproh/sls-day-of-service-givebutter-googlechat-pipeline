@@ -6,9 +6,7 @@ function doPost(e) {
   if (json.event === "ticket.created") {
     return handleTicketCreated(ss, data);
   }
-  if (json.event === "ticket.checked_in" || json.event === "ticket.updated") {
-    return handleTicketCheckIn(ss, data); // 👈 Automatically logs check-ins!
-  }
+  
   if (json.event === "transaction.succeeded") {
     return handleTransactionSucceeded(ss, data);
   }
@@ -332,7 +330,7 @@ function runWeeklySnapshot() {
 }
 
 // ==========================================
-// 🔍 HELPERS & ANALYTICS (CALENDAR-WEEK ANCHORED)
+//  HELPERS & ANALYTICS (CALENDAR-WEEK ANCHORED)
 // ==========================================
 function getRosterEntry(ss, memberId) {
   var rosterSheet = ss.getSheetByName("Roster");
