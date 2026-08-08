@@ -1,6 +1,3 @@
-// ==========================================
-//  1. LIVE WEBHOOK TRAFFIC COP
-// ==========================================
 function doPost(e) {
   var json = JSON.parse(e.postData.contents);
   var data = json.data;
@@ -8,6 +5,9 @@ function doPost(e) {
 
   if (json.event === "ticket.created") {
     return handleTicketCreated(ss, data);
+  }
+  if (json.event === "ticket.checked_in" || json.event === "ticket.updated") {
+    return handleTicketCheckIn(ss, data); // 👈 Automatically logs check-ins!
   }
   if (json.event === "transaction.succeeded") {
     return handleTransactionSucceeded(ss, data);
@@ -25,7 +25,6 @@ function handleTicketCreated(ss, data) {
   var currentDate = new Date();
   var ticketId = data.id || "";
 
-  var VOLUNTEER_TICKET_MATCH = "general admission";
   var BANQUET_TICKET_KEYWORDS = ["banquet", "honorary"];
   
   var isBanquetTicket = BANQUET_TICKET_KEYWORDS.some(function(k) { return ticketTitle.includes(k); });
@@ -33,8 +32,13 @@ function handleTicketCreated(ss, data) {
     return ContentService.createTextOutput(JSON.stringify({"status": "skipped banquet ticket"})).setMimeType(ContentService.MimeType.JSON);
   }
 
-  var isVolunteerTicket = ticketTitle.includes(VOLUNTEER_TICKET_MATCH);
-  if (!isVolunteerTicket) {
+  // 🎯 Map incoming Givebutter ticket titles to your exact sheet dropdowns ("GA" or "GA + T-Shirt")
+  var recordedTicketType = "GA"; // Default fallback
+  if (ticketTitle.includes("t-shirt") || ticketTitle.includes("shirt")) {
+    recordedTicketType = "GA + T-Shirt";
+  } else if (ticketTitle.includes("general admission") || ticketTitle.includes("ga")) {
+    recordedTicketType = "GA";
+  } else {
     return ContentService.createTextOutput(JSON.stringify({"status": "skipped unrecognized ticket", "title": data.title})).setMimeType(ContentService.MimeType.JSON);
   }
 
@@ -49,17 +53,17 @@ function handleTicketCreated(ss, data) {
     }
   }
 
-  volunteerSheet.appendRow([currentDate, donorName, donorEmail, data.title || "Volunteer", ticketId]);
+  volunteerSheet.appendRow([currentDate, donorName, donorEmail, recordedTicketType, ticketId]);
 
   var reportSheet = ss.getSheetByName("Weekly Report");
   var liveVolunteerCount = reportSheet.getRange("G2").getValue();
 
   var volunteerMessage = "🙋🏽‍♂️ *NEW VOLUNTEER REGISTERED!*\n" +
                          "*" + donorName + "* signed up for our *2026 Day Of Service*! 💛\n" +
+                         "🎟️ Type: *" + recordedTicketType + "*\n" +
                          "🚀 Total mobilized: *" + liveVolunteerCount + "* volunteers!";
   sendGoogleChatNotification(volunteerMessage, CONFIG.URL_VOLUNTEER_ALERTS);
 
-  // Check volunteer milestones (e.g., hitting 60 and beyond)
   checkAndAnnounceVolunteerMilestone(ss);
 
   return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
@@ -116,7 +120,6 @@ function handleTransactionSucceeded(ss, data) {
 
   donorSheet.appendRow([currentDate, donorName, donorEmail, teamCohort, amount, scholarName, transactionId]);
 
-  // Check fundraising milestone & approaching milestones
   checkAndAnnounceMilestone(ss);
 
   return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
@@ -131,6 +134,22 @@ var EVENT_DATE            = new Date("2026-07-25T23:59:59");
 function buildRecapMessage(headerTitle, bannerOverride) {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   var reportSheet = ss.getSheetByName("Weekly Report");
+  
+  // ⏱️ Dynamic Countdown Calculation (Fixed typo)
+  var today = new Date();
+  var eventDateOnly = new Date(EVENT_DATE.getFullYear(), EVENT_DATE.getMonth(), EVENT_DATE.getDate());
+  var todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  var diffTime = eventDateOnly - todayOnly;
+  var daysRemaining = Math.round(diffTime / (1000 * 60 * 60 * 24));
+  
+  var countdownText = "";
+  if (daysRemaining > 0) {
+    countdownText = "⏳ *" + daysRemaining + " DAY" + (daysRemaining === 1 ? "" : "S") + " UNTIL DAY OF SERVICE!*";
+  } else if (daysRemaining === 0) {
+    countdownText = "🔥 *IT'S DAY OF SERVICE TODAY! LET'S GO!* 🔥";
+  } else {
+    countdownText = "🌟 *THANK YOU FOR AN AMAZING DAY OF SERVICE!* 🌟";
+  }
   
   var totalRaised = reportSheet.getRange("B2").getValue() || 0;
   var totalVolunteers = reportSheet.getRange("G2").getValue() || 0;
@@ -149,11 +168,10 @@ function buildRecapMessage(headerTitle, bannerOverride) {
   }
   if (top5String === "") { top5String = "No individual donations registered yet! 🌱\n"; }
 
-  // 🎯 Dynamic Milestone / Approaching Milestone Banner Logic
   var milestoneInterval = 500;
   var nextTier = Math.ceil(totalRaised / milestoneInterval) * milestoneInterval;
   var distanceToMilestone = nextTier - totalRaised;
-  var cushion = 100; // Triggers "Almost There" if within $100 of the next milestone
+  var cushion = 200; // 👈 Expanded to 200 so your current $4,837 total triggers the $5k almost-there alert!
   
   var milestoneBanner = "";
   if (distanceToMilestone > 0 && distanceToMilestone <= cushion) {
@@ -176,13 +194,12 @@ function buildRecapMessage(headerTitle, bannerOverride) {
 
   var message = headerTitle + "\n" +
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                countdownText + "\n\n" +
                 banner +
                 milestoneBanner +
                 "💰 *TOTAL RAISED:* *$" + totalRaised.toFixed(2) + "* / $" + CONFIG.GOAL_AMOUNT.toFixed(2) + " (" + progressPercentage.toFixed(0) + "% progress) 🚀\n" +
                 "🙋🏽‍♂️ *VOLUNTEERS:* *" + totalVolunteers + "* leaders registered!\n" +
-                "☀️ *RAISED TODAY:* +$" + analytics.todayTotalRaised.toFixed(2) + " added today! 🚀\n" +
-                // "📈 *THIS WEEK:* Added +$" + weeklyDifference.toFixed(2) + " to the campaign!\n\n" + (Commented out for Friday)
-                "\n" +
+                "☀️ *RAISED TODAY:* +$" + analytics.todayTotalRaised.toFixed(2) + " added today! 🚀\n\n" +
                 "🏆 *COHORT LEADERBOARD:*\n" +
                 "👉 *" + winningTeam + "* leads the race with *$" + winningAmount.toFixed(2) + "* raised! 🔥\n\n" +
                 "💎 *ALL-TIME TOP SCHOLARS:*\n" +
@@ -191,7 +208,7 @@ function buildRecapMessage(headerTitle, bannerOverride) {
                 highestDonorSection + "\n\n" +
                 "☀️ *ACTIVE FUNDRASIERS TODAY:* " + (analytics.todayActiveScholarsList || "None yet today—let's get the momentum rolling!") + "\n\n" +
                 "👏 *ACTIVE WEEKLY FUNDRAISERS:* " + (analytics.activeScholarsList || "None this week yet—let's secure that first donation!") + "\n\n" +
-                "Every single share and donation brings us closer to making an impact. Let's keep supporting one another and push hard as a cohort! 💛💙";
+                "We made it SLS Fam So proud of us!! Thank you to every single scholar, donor, and volunteer who made this possible. We are going to celebrate this big milestone tomorrow together.  💛💙";
 
   return message;
 }
@@ -201,13 +218,8 @@ function sendDailyCountdownRecap() {
   if (today < EVENT_COUNTDOWN_START || today > EVENT_DATE) {
     return; 
   }
-  var msPerDay = 1000 * 60 * 60 * 24;
-  var daysLeft = Math.ceil((EVENT_DATE.getTime() - today.getTime()) / msPerDay);
-  var banner = (daysLeft > 0)
-    ? ("⏳ *" + daysLeft + " DAY" + (daysLeft === 1 ? "" : "S") + " UNTIL DAY OF SERVICE!*\n\n")
-    : ("🎉 *TODAY IS DAY OF SERVICE!!* 🎉\n\n");
-  var message = buildRecapMessage("🚨 *SLS DAY OF SERVICE: DAILY COUNTDOWN* 🚨", banner);
-  sendGoogleChatNotification(message, CONFIG.URL_WEEKLY_RECAP);
+  var message = buildRecapMessage("🚨 *SLS DAY OF SERVICE: DAILY COUNTDOWN* 🚨", "");
+  sendGoogleChatNotification(message, CONFIG.URL_VOLUNTEER_ALERTS);
 }
 
 function checkAndAnnounceMilestone(ss) {
@@ -221,21 +233,29 @@ function checkAndAnnounceMilestone(ss) {
   
   if (currentTier > lastAnnounced && currentTier > 0) {
     var percentReached = ((currentTier / CONFIG.GOAL_AMOUNT) * 100).toFixed(0);
-    var milestoneMsg = "🎉 *MILESTONE UNLOCKED!* 🎉\n" +
-                       "We just crossed *$" + currentTier.toLocaleString() + "* — that's *" + percentReached + "%* of our $" + CONFIG.GOAL_AMOUNT.toLocaleString() + " goal! 🙌🏽💙\n" +
-                       "Keep it going, SLS fam! 💛";
+    
+    var milestoneMsg = "";
+    if (currentTier >= 5000) {
+      // 🌟 Special $5,000 Grand Finale Goal Message!
+      milestoneMsg = "🎉🔥 **GOAL REACHED! CAMPAIGN GOAL UNLOCKED!** 🔥🎉\n" +
+                     "We have officially crossed *$5,000*! 💯🏆 Thank you to every single scholar, donor, and volunteer who made this possible. Let's keep making an impact! 🙌🏽💙💛";
+    } else {
+      milestoneMsg = "🎉 *MILESTONE UNLOCKED!* 🎉\n" +
+                     "We just crossed *$" + currentTier.toLocaleString() + "* — that's *" + percentReached + "%* of our $" + CONFIG.GOAL_AMOUNT.toLocaleString() + " goal! 🙌🏽💙\n" +
+                     "Keep it going, SLS fam! 💛";
+    }
+    
     sendGoogleChatNotification(milestoneMsg, CONFIG.URL_WEEKLY_RECAP);
     props.setProperty("LAST_MILESTONE_ANNOUNCED", currentTier.toString());
   }
   
-  // Check if we are approaching a milestone ("Almost There" alert)
   checkApproachingMilestone(ss, totalRaised);
 }
 
 function checkApproachingMilestone(ss, totalRaised) {
   var milestoneInterval = 500; 
   var nextTier = Math.ceil(totalRaised / milestoneInterval) * milestoneInterval;
-  var cushion = 100; // Triggers if within $100 of the next milestone
+  var cushion = 200; // 👈 Expanded cushion so $4,837 triggers the $5,000 alert!
   var distanceToMilestone = nextTier - totalRaised;
   
   if (distanceToMilestone > 0 && distanceToMilestone <= cushion) {
@@ -243,10 +263,10 @@ function checkApproachingMilestone(ss, totalRaised) {
     var lastApproachingAlert = props.getProperty("LAST_APPROACHING_MILESTONE") || "";
     
     if (lastApproachingAlert !== nextTier.toString()) {
-      var approachingMsg = "👀 *ALMOST THERE, SLS FAM!* 👀\n" +
+      var approachingMsg = "👀 *WE ARE ALMOST THERE, SLS FAM!!* 👀\n" +
                            "We are just *$" + distanceToMilestone.toFixed(2) + "* away from crossing *$" + nextTier.toLocaleString() + "*! 🏁💙\n" +
                            "Let's secure a few final donations and smash this milestone right now! 💰🔥";
-      sendGoogleChatNotification(approachingMsg, CONFIG.URL_WEEKLY_RECAP);
+      sendGoogleChatNotification(approachingMsg, CONFIG.URL_VOLUNTEER_ALERTS);
       props.setProperty("LAST_APPROACHING_MILESTONE", nextTier.toString());
     }
   }
