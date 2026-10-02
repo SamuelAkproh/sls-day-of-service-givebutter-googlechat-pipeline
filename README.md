@@ -36,7 +36,7 @@ The system operates as a lightweight serverless data pipeline structured across 
 *  **MVP leaderboard:** Scans raw data blocks to isolate and crown individual high-performers for each competitive cohort.
 *  **Top 5 Individual Leaderboards:** Dynamically groups individual supporters with multiline transaction entries to showcase overall campaign leaders.
 *  **Snapshot History Archiving:** Automatically captures weekly metrics to an isolated archive table (`Snapshot History`) on execution, tracking week-over-week growth metrics dynamically without dashboard corruption.
-*  **Security First Architecture:** Formatted completely using centralized environment config patterns to safeguard production database keys and incoming endpoint routes during public deployment.
+
 
 ---
 
